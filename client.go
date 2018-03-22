@@ -1,13 +1,15 @@
 package buffer
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
+	"io/ioutil"
 	"log"
 	"net/http"
 	"net/url"
 
+	"github.com/pkg/errors"
 	"golang.org/x/oauth2"
 )
 
@@ -17,7 +19,7 @@ const (
 	DefaultTokenURL = DefaultBaseURL + "/oauth2/token"
 )
 
-type ClientOptions struct {
+type ClientConfig struct {
 	// Required
 	ClientID     string
 	ClientSecret string
@@ -33,7 +35,7 @@ type ClientOptions struct {
 
 func stringp(str string) *string { return &str }
 
-func (opts *ClientOptions) setDefault() error {
+func (opts *ClientConfig) setDefault() error {
 	if opts.BaseURL == nil {
 		opts.BaseURL = stringp(DefaultBaseURL)
 	}
@@ -64,17 +66,17 @@ type Client struct {
 	accessToken string
 }
 
-func NewClient(opts *ClientOptions) (*Client, error) {
+func NewClient(opts *ClientConfig) (*Client, error) {
 	if opts == nil {
-		opts = new(ClientOptions)
+		opts = new(ClientConfig)
 	}
 	if err := opts.setDefault(); err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, "invalid configuration")
 	}
 
 	baseURL, err := url.Parse(*opts.BaseURL)
 	if err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, "parsing base URL")
 	}
 
 	return &Client{
@@ -91,36 +93,67 @@ func NewClient(opts *ClientOptions) (*Client, error) {
 	}, nil
 }
 
-func (c *Client) get(ctx context.Context, ref *url.URL, v interface{}) error {
+func (c *Client) User() *UserService {
+	return &UserService{client: c}
+}
 
-	req := mustRequest(http.NewRequest(
+func (c *Client) Profiles() *ProfilesService {
+	return &ProfilesService{client: c}
+}
+
+func (c *Client) get(ctx context.Context, ref *url.URL, res interface{}) error {
+	r := mustRequest(http.NewRequest(
 		"GET",
 		c.baseURL.ResolveReference(ref).String(),
 		nil,
 	))
+	return errors.Wrap(c.do(ctx, r, res), "performing GET request")
+}
+
+func (c *Client) post(ctx context.Context, ref *url.URL, req, res interface{}) error {
+	body := bytes.NewBuffer(nil)
+	if req != nil {
+		if err := json.NewEncoder(body).Encode(req); err != nil {
+			return errors.Wrap(err, "encoding post request body")
+		}
+	}
+	r := mustRequest(http.NewRequest(
+		"POST",
+		c.baseURL.ResolveReference(ref).String(),
+		body,
+	))
+	return errors.Wrap(c.do(ctx, r, res), "perfoming POST request")
+}
+
+func (c *Client) do(ctx context.Context, req *http.Request, res interface{}) error {
 	req = req.WithContext(ctx)
 	client := c.prepare(ctx)
-
-	log.Print(req.URL)
 	resp, err := client.Do(req)
 	if err != nil {
-		return err
+		return errors.Wrap(err, "executing request")
 	}
 	defer resp.Body.Close()
+
+	body, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		return errors.Wrap(err, "reading response")
+	}
 	if resp.StatusCode != 200 {
 		return errors.New(resp.Status)
 	}
-	return json.NewDecoder(resp.Body).Decode(v)
+
+	if d {
+		log.Println(string(body))
+		log.Println("===")
+	}
+
+	return errors.Wrap(json.Unmarshal(body, res), "decoding JSON response")
 }
 
 func (c *Client) prepare(ctx context.Context) *http.Client {
 	return c.oauthCfg.Client(ctx, &oauth2.Token{
 		AccessToken: c.accessToken,
 	})
-}
-
-func (c *Client) User() *UserService {
-	return &UserService{client: c}
 }
 
 func mustRequest(req *http.Request, err error) *http.Request {

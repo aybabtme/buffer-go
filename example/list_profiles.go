@@ -27,11 +27,11 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	user, err := client.User().Get(ctx)
+	profiles, err := client.Profiles().List(ctx)
 	if err != nil {
 		log.Fatal(err)
 	}
-	if err := json.NewEncoder(os.Stdout).Encode(user); err != nil {
+	if err := json.NewEncoder(os.Stdout).Encode(profiles); err != nil {
 		log.Fatal(err)
 	}
 }
