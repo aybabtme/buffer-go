@@ -1,0 +1,36 @@
+package main
+
+import (
+	"context"
+	"encoding/json"
+	"flag"
+	"log"
+	"os"
+	"time"
+
+	buffer "github.com/aybabtme/buffer-go"
+)
+
+func main() {
+	cfg := &buffer.ClientOptions{}
+	flag.StringVar(&cfg.ClientID, "ClientID", os.Getenv("BUFFER_CLIENTID"), "")
+	flag.StringVar(&cfg.ClientSecret, "ClientSecret", os.Getenv("BUFFER_CLIENTSECRET"), "")
+	flag.StringVar(&cfg.RedirectURL, "RedirectURL", os.Getenv("BUFFER_REDIRECTURL"), "")
+	flag.StringVar(&cfg.AccessToken, "AccessToken", os.Getenv("BUFFER_ACCESSTOKEN"), "")
+	flag.Parse()
+
+	client, err := buffer.NewClient(cfg)
+	if err != nil {
+		log.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	user, err := client.User().Get(ctx)
+	if err != nil {
+		log.Fatal(err)
+	}
+	if err := json.NewEncoder(os.Stdout).Encode(user); err != nil {
+		log.Fatal(err)
+	}
+}
